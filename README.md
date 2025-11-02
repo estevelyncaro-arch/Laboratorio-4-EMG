@@ -846,9 +846,6 @@ import matplotlib.pyplot as plt
 from scipy.signal import butter, filtfilt
 from scipy.fft import fft, fftfreq
 
-# =====================================================
-# 1️⃣ CONFIGURACIÓN Y CARGA DE DATOS
-# =====================================================
 ruta_txt = "/senal_EMG_captura_2.txt"  # <-- cambia si es necesario
 fs = 1000                              # Frecuencia de muestreo [Hz]
 
@@ -857,9 +854,6 @@ data = np.loadtxt(ruta_txt)
 t = data[:, 0]
 x = data[:, 1]
 
-# =====================================================
-# 2️⃣ FILTRADO PASA BANDA (20–450 Hz)
-# =====================================================
 def butter_bandpass(lowcut, highcut, fs, order=4):
     nyq = 0.5 * fs
     low, high = lowcut / nyq, highcut / nyq
@@ -872,9 +866,6 @@ def aplicar_filtro(data, lowcut, highcut, fs, order=4):
 
 x_filt = aplicar_filtro(x, 20, 450, fs)
 
-# =====================================================
-# 3️⃣ SEGMENTACIÓN AUTOMÁTICA DE CONTRACCIONES
-# =====================================================
 x_rect = np.abs(x_filt - np.mean(x_filt))
 b, a = butter(2, 2/(fs/2), btype='low')
 env = filtfilt(b, a, x_rect)
@@ -896,9 +887,6 @@ contracciones = [(i, f) for i, f in zip(start_idx, end_idx) if (f - i) > min_len
 
 print(f"🔹 Se detectaron {len(contracciones)} contracciones")
 
-# =====================================================
-# 4️⃣ FFT POR CONTRACCIÓN
-# =====================================================
 def calcular_fft(signal, fs):
     N = len(signal)
     freqs = fftfreq(N, 1/fs)
@@ -906,9 +894,6 @@ def calcular_fft(signal, fs):
     mask = freqs > 0  # solo frecuencias positivas
     return freqs[mask], fft_vals[mask]
 
-# =====================================================
-# 5️⃣ COMPARAR ESPECTROS: PRIMERAS VS ÚLTIMAS CONTRACCIONES
-# =====================================================
 num_mostrar = 3  # número de contracciones iniciales/finales a comparar
 
 primeras = contracciones[:num_mostrar]
@@ -935,9 +920,6 @@ plt.grid(True)
 plt.tight_layout()
 plt.show()
 
-# =====================================================
-#  ANÁLISIS DE FATIGA
-# =====================================================
 # Calcular frecuencia media para cada contracción
 freqs_medias = []
 for ini, fin in contracciones:
