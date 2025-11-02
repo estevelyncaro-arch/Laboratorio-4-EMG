@@ -323,7 +323,289 @@ plt.show()
 
 <img width="1189" height="590" alt="image" src="https://github.com/user-attachments/assets/72288403-010d-46ac-a253-9b0bcf061ecd" />
 
-Despues se aplico un filtro pasabanda (20–450 Hz) para eliminar ruido y artefactos. 
+Despues se aplico un filtro pasabanda (20–450 Hz) para eliminar ruido y artefactos.
+esto se logro con el siguiente codigo:
+
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.signal import butter, filtfilt
+
+
+ruta_txt = "/senal_EMG_captura_2.txt"   # Cambia por tu archivo
+col_tiempo = 0
+col_voltaje = 1
+fs = 1000                # Frecuencia de muestreo (Hz) — cámbiala según tu caso
+
+
+datos = np.loadtxt(ruta_txt)
+tiempo = datos[:, col_tiempo]
+voltaje = datos[:, col_voltaje]
+
+
+def butter_bandpass(lowcut, highcut, fs, order=4):
+    nyq = 0.5 * fs
+    low = lowcut / nyq
+    high = highcut / nyq
+    b, a = butter(order, [low, high], btype='band')
+    return b, a
+
+def aplicar_filtro(data, lowcut, highcut, fs, order=4):
+    b, a = butter_bandpass(lowcut, highcut, fs, order=order)
+    y = filtfilt(b, a, data)
+    return y
+
+# Aplicar filtro 20–450 Hz
+voltaje_filtrado = aplicar_filtro(voltaje, 20, 450, fs, order=4)
+
+mascara_inicio = tiempo <= 10
+t_inicio = tiempo[mascara_inicio]
+v_inicio = voltaje_filtrado[mascara_inicio]
+
+t_final_max = tiempo.max()
+mascara_final = tiempo >= (t_final_max - 20)
+t_final = tiempo[mascara_final]
+v_final = voltaje_filtrado[mascara_final]
+
+plt.figure(figsize=(12,6))
+
+plt.subplot(2,1,1)
+plt.plot(t_inicio, v_inicio, color='b')
+plt.title("Primeros 10 segundos (filtrados 20–450 Hz)")
+plt.xlabel("Tiempo (s)")
+plt.ylabel("Voltaje (V)")
+plt.grid(True)
+
+plt.subplot(2,1,2)
+plt.plot(t_final, v_final, color='r')
+plt.title("Últimos 20 segundos (filtrados 20–450 Hz)")
+plt.xlabel("Tiempo (s)")
+plt.ylabel("Voltaje (V)")
+plt.grid(True)
+
+plt.tight_layout()
+plt.show()
+```
+
+evidenciando así la grafica:
+
+<img width="1189" height="590" alt="image" src="https://github.com/user-attachments/assets/88b76770-7823-4a2e-a7e5-fadd8a778e55" />
+
+El método que se utilizo para seccionar la señal se llama adaptive statistical threshold la cual no usa cruces por cero ni transformadas de frecuencia, sino que se basa en la amplitud de la envolvente y un umbral estadístico dinámico para detectar las fases activas del músculo.  
+gracias a esto se pudo halla las contarcciones por segundo
+
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.signal import butter, filtfilt
+
+fs = 1000  # Frecuencia de muestreo [Hz]
+ruta_txt = "/senal_EMG_captura_2.txt"   # <-- cambia esta ruta
+
+data = np.loadtxt(ruta_txt)
+t = data[:, 0]
+x = data[:, 1]
+
+lowcut, highcut, orden = 20, 450, 4
+
+def butter_bandpass(lowcut, highcut, fs, order=4):
+    nyq = 0.5 * fs
+    b, a = butter(order, [lowcut/nyq, highcut/nyq], btype='band')
+    return b, a
+
+def aplicar_filtro(x, lowcut, highcut, fs, order=4):
+    b, a = butter_bandpass(lowcut, highcut, fs, order)
+    return filtfilt(b, a, x)
+
+x_f = aplicar_filtro(x, lowcut, highcut, fs, orden)
+
+x_rect = np.abs(x_f - np.mean(x_f))
+b, a = butter(2, 2/(fs/2), btype='low')
+env = filtfilt(b, a, x_rect)
+env /= np.max(env)
+
+factor_umbral = 1.2       # más alto = menos detecciones
+umbral = np.mean(env) + factor_umbral * np.std(env)
+activa = env > umbral
+
+# bordes
+start_idx = np.where(np.diff(activa.astype(int)) == 1)[0]
+end_idx   = np.where(np.diff(activa.astype(int)) == -1)[0]
+if len(end_idx) > 0 and end_idx[0] < start_idx[0]:
+    end_idx = end_idx[1:]
+if len(start_idx) > len(end_idx):
+    start_idx = start_idx[:-1]
+
+# extensiones
+pre_ext  = int(0.05 * fs)
+post_ext = int(0.05 * fs)
+start_idx = np.clip(start_idx - pre_ext, 0, len(x)-1)
+end_idx   = np.clip(end_idx + post_ext, 0, len(x)-1)
+
+# eliminar eventos cortos
+min_duracion = int(0.15 * fs)    # 150 ms
+contracciones = [(i, f) for i, f in zip(start_idx, end_idx) if (f - i) > min_duracion]
+
+# fusionar eventos cercanos
+fusionadas = []
+if contracciones:
+    ini, fin = contracciones[0]
+    for i, f in contracciones[1:]:
+        if i - fin < 0.30 * fs:       # < 300 ms ⇒ misma contracción
+            fin = f
+        else:
+            fusionadas.append((ini, fin))
+            ini, fin = i, f
+    fusionadas.append((ini, fin))
+
+segmentos = {}
+for k, (ini, fin) in enumerate(fusionadas, 1):
+    nombre = f"c{k}"
+    segmentos[nombre] = x_f[ini:fin]
+    globals()[nombre] = segmentos[nombre]
+    print(f"Contracción {k} guardada como '{nombre}' ({t[ini]:.2f}s – {t[fin]:.2f}s)")
+
+print(f"\n🔹 Total detectadas: {len(fusionadas)}")
+
+
+plt.figure(figsize=(10,4))
+plt.plot(t, x_f/np.max(np.abs(x_f)), color='blue', alpha=0.7, label="Señal filtrada (20–450 Hz)")
+plt.plot(t, env, color='orange', lw=2, label="Envolvente normalizada")
+plt.axhline(umbral, color='red', ls='--', label=f"Umbral ({umbral:.2f})")
+
+for ini, fin in fusionadas:
+    plt.axvspan(t[ini], t[fin], color='red', alpha=0.25)
+
+plt.title(f"Detección automática de contracciones ({len(fusionadas)} encontradas)")
+plt.xlabel("Tiempo [s]")
+plt.ylabel("Voltaje [V]")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+```
+obteniendo asi los siguiente resultados:
+
+ Contracción 1 guardada como 'c1' (0.15s – 0.28s)
+Contracción 2 guardada como 'c2' (0.74s – 0.86s)
+Contracción 3 guardada como 'c3' (1.30s – 1.42s)
+Contracción 4 guardada como 'c4' (1.84s – 1.94s)
+Contracción 5 guardada como 'c5' (2.48s – 2.57s)
+Contracción 6 guardada como 'c6' (3.10s – 3.18s)
+Contracción 7 guardada como 'c7' (3.61s – 3.70s)
+Contracción 8 guardada como 'c8' (4.17s – 4.19s)
+Contracción 9 guardada como 'c9' (4.23s – 4.32s)
+Contracción 10 guardada como 'c10' (4.82s – 4.86s)
+Contracción 11 guardada como 'c11' (5.98s – 6.13s)
+Contracción 12 guardada como 'c12' (6.61s – 6.62s)
+Contracción 13 guardada como 'c13' (7.05s – 7.08s)
+Contracción 14 guardada como 'c14' (7.39s – 7.43s)
+Contracción 15 guardada como 'c15' (8.01s – 8.03s)
+Contracción 16 guardada como 'c16' (8.07s – 8.11s)
+Contracción 17 guardada como 'c17' (8.56s – 8.67s)
+Contracción 18 guardada como 'c18' (9.13s – 9.18s)
+Contracción 19 guardada como 'c19' (9.22s – 9.26s)
+Contracción 20 guardada como 'c20' (9.68s – 9.79s)
+Contracción 21 guardada como 'c21' (10.21s – 10.27s)
+Contracción 22 guardada como 'c22' (10.32s – 10.37s)
+Contracción 23 guardada como 'c23' (10.83s – 10.93s)
+Contracción 24 guardada como 'c24' (11.44s – 11.52s)
+Contracción 25 guardada como 'c25' (12.02s – 12.12s)
+Contracción 26 guardada como 'c26' (12.58s – 12.68s)
+Contracción 27 guardada como 'c27' (13.14s – 13.25s)
+Contracción 28 guardada como 'c28' (13.64s – 13.73s)
+Contracción 29 guardada como 'c29' (14.28s – 14.38s)
+Contracción 30 guardada como 'c30' (14.77s – 14.90s)
+Contracción 31 guardada como 'c31' (15.36s – 15.37s)
+Contracción 32 guardada como 'c32' (15.43s – 15.53s)
+Contracción 33 guardada como 'c33' (15.90s – 16.02s)
+Contracción 34 guardada como 'c34' (16.53s – 16.59s)
+Contracción 35 guardada como 'c35' (17.02s – 17.15s)
+Contracción 36 guardada como 'c36' (17.75s – 17.80s)
+Contracción 37 guardada como 'c37' (18.34s – 18.38s)
+Contracción 38 guardada como 'c38' (18.86s – 18.90s)
+Contracción 39 guardada como 'c39' (19.41s – 19.50s)
+Contracción 40 guardada como 'c40' (20.61s – 20.69s)
+Contracción 41 guardada como 'c41' (21.19s – 21.26s)
+Contracción 42 guardada como 'c42' (21.89s – 21.92s)
+Contracción 43 guardada como 'c43' (22.34s – 22.44s)
+Contracción 44 guardada como 'c44' (22.48s – 22.54s)
+Contracción 45 guardada como 'c45' (22.92s – 22.96s)
+Contracción 46 guardada como 'c46' (23.04s – 23.08s)
+Contracción 47 guardada como 'c47' (23.69s – 23.72s)
+Contracción 48 guardada como 'c48' (24.81s – 24.84s)
+Contracción 49 guardada como 'c49' (25.35s – 25.44s)
+Contracción 50 guardada como 'c50' (25.94s – 25.97s)
+Contracción 51 guardada como 'c51' (26.53s – 26.61s)
+Contracción 52 guardada como 'c52' (27.15s – 27.26s)
+Contracción 53 guardada como 'c53' (27.73s – 27.86s)
+Contracción 54 guardada como 'c54' (28.27s – 28.44s)
+Contracción 55 guardada como 'c55' (28.97s – 29.03s)
+Contracción 56 guardada como 'c56' (29.51s – 29.56s)
+Contracción 57 guardada como 'c57' (29.60s – 29.63s)
+Contracción 58 guardada como 'c58' (30.13s – 30.23s)
+Contracción 59 guardada como 'c59' (30.86s – 30.90s)
+Contracción 60 guardada como 'c60' (31.39s – 31.43s)
+Contracción 61 guardada como 'c61' (32.57s – 32.66s)
+Contracción 62 guardada como 'c62' (33.22s – 33.26s)
+Contracción 63 guardada como 'c63' (35.57s – 35.78s)
+Contracción 64 guardada como 'c64' (36.23s – 36.38s)
+Contracción 65 guardada como 'c65' (36.80s – 36.95s)
+Contracción 66 guardada como 'c66' (37.45s – 37.51s)
+Contracción 67 guardada como 'c67' (38.02s – 38.08s)
+Contracción 68 guardada como 'c68' (38.12s – 38.20s)
+Contracción 69 guardada como 'c69' (38.66s – 38.83s)
+Contracción 70 guardada como 'c70' (39.27s – 39.32s)
+Contracción 71 guardada como 'c71' (39.36s – 39.43s)
+Contracción 72 guardada como 'c72' (39.93s – 40.04s)
+Contracción 73 guardada como 'c73' (40.50s – 40.55s)
+Contracción 74 guardada como 'c74' (41.06s – 41.10s)
+Contracción 75 guardada como 'c75' (41.81s – 41.85s)
+Contracción 76 guardada como 'c76' (42.30s – 42.47s)
+Contracción 77 guardada como 'c77' (43.00s – 43.06s)
+Contracción 78 guardada como 'c78' (43.54s – 43.59s)
+Contracción 79 guardada como 'c79' (43.63s – 43.69s)
+Contracción 80 guardada como 'c80' (44.31s – 44.34s)
+Contracción 81 guardada como 'c81' (44.38s – 44.42s)
+Contracción 82 guardada como 'c82' (44.95s – 45.00s)
+Contracción 83 guardada como 'c83' (45.62s – 45.86s)
+Contracción 84 guardada como 'c84' (46.40s – 46.44s)
+Contracción 85 guardada como 'c85' (47.02s – 47.06s)
+Contracción 86 guardada como 'c86' (47.56s – 47.68s)
+Contracción 87 guardada como 'c87' (48.90s – 48.93s)
+Contracción 88 guardada como 'c88' (50.19s – 50.21s)
+Contracción 89 guardada como 'c89' (50.73s – 50.81s)
+Contracción 90 guardada como 'c90' (51.38s – 51.48s)
+Contracción 91 guardada como 'c91' (52.03s – 52.06s)
+Contracción 92 guardada como 'c92' (53.84s – 53.90s)
+Contracción 93 guardada como 'c93' (53.93s – 53.97s)
+Contracción 94 guardada como 'c94' (54.42s – 54.48s)
+Contracción 95 guardada como 'c95' (55.08s – 55.19s)
+Contracción 96 guardada como 'c96' (55.71s – 55.86s)
+Contracción 97 guardada como 'c97' (56.40s – 56.53s)
+Contracción 98 guardada como 'c98' (57.09s – 57.14s)
+Contracción 99 guardada como 'c99' (57.73s – 57.79s)
+Contracción 100 guardada como 'c100' (58.20s – 58.26s)
+Contracción 101 guardada como 'c101' (58.34s – 58.38s)
+Contracción 102 guardada como 'c102' (58.91s – 59.01s)
+Contracción 103 guardada como 'c103' (59.70s – 59.76s)
+Contracción 104 guardada como 'c104' (59.81s – 59.83s)
+Contracción 105 guardada como 'c105' (60.27s – 60.43s)
+Contracción 106 guardada como 'c106' (60.92s – 60.98s)
+Contracción 107 guardada como 'c107' (61.08s – 61.11s)
+Contracción 108 guardada como 'c108' (61.56s – 61.60s)
+Contracción 109 guardada como 'c109' (61.73s – 61.77s)
+Contracción 110 guardada como 'c110' (62.35s – 62.43s)
+
+🔹 Total detectadas: 110
+
+<img width="989" height="390" alt="image" src="https://github.com/user-attachments/assets/4f0af3d9-4472-4b4a-9c39-f4a1aa4ddab2" />
+
+
+
+
+
+
 
 ## Parte C 
 
