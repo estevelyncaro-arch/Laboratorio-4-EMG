@@ -710,10 +710,125 @@ Contracción 110 guardada como 'c110' (62.35s – 62.43s)
 
 <img width="989" height="390" alt="image" src="https://github.com/user-attachments/assets/4f0af3d9-4472-4b4a-9c39-f4a1aa4ddab2" />
 
+En la siguiente parte se calcularon la frecuencia media y la frecuencia mediana con el siguiente codigo:
+
+```python
+import numpy as np
+import pandas as pd
+from scipy.fft import fft, fftfreq
+
+fs = 1000  # Frecuencia de muestreo [Hz]
+num_contracciones = 110  # número total de contracciones (c1, c2, ..., c110)
+
+resultados = []
+
+for i in range(1, num_contracciones + 1):
+    var_name = f"c{i}"
+    if var_name in globals():
+        signal = globals()[var_name]
+        N = len(signal)
+        duracion = N / fs
+
+        # FFT
+        yf = np.abs(fft(signal))
+        xf = fftfreq(N, 1/fs)
+
+        # Solo frecuencias positivas
+        pos_mask = xf > 0
+        xf = xf[pos_mask]
+        yf = yf[pos_mask]
+
+        # Calcular frecuencia media y mediana (ponderadas por amplitud)
+        f_media = np.sum(xf * yf) / np.sum(yf)
+        f_cum = np.cumsum(yf) / np.sum(yf)
+        f_mediana = xf[np.where(f_cum >= 0.5)[0][0]]
+
+        resultados.append({
+            "Contracción": var_name,
+            "Duración (s)": round(duracion, 3),
+            "Frecuencia Media (Hz)": round(f_media, 2),
+            "Frecuencia Mediana (Hz)": round(f_mediana, 2)
+        })
+
+tabla = pd.DataFrame(resultados)
+print(tabla)
+
+tabla.to_csv("resumen_contracciones.csv", index=False)
+print("\n✅ Tabla guardada como 'resumen_contracciones.csv'")
+```
+para evidenciar la siguiente tabla:
+
+| Contracción | Duración (s) | Frecuencia Media (Hz) | Frecuencia Mediana (Hz) |
+|--------------|--------------|-----------------------|--------------------------|
+| c1  | 1.307 | 63.24 | 25.25 |
+| c2  | 1.282 | 52.76 | 28.08 |
+| c3  | 1.200 | 53.12 | 26.67 |
+| c4  | 0.997 | 49.89 | 25.08 |
+| c5  | 0.886 | 51.71 | 23.70 |
+| ... | ...   | ...   | ...   |
+| c106 | 0.528 | 48.04 | 30.30 |
+| c107 | 0.309 | 49.62 | 32.36 |
+| c108 | 0.410 | 47.86 | 29.27 |
+| c109 | 0.403 | 60.58 | 34.74 |
+| c110 | 0.809 | 59.43 | 33.37 |
+
+Ahora se evidenciar las frecuencias para la fatiga 
+
+```python
+import pandas as pd
+import matplotlib.pyplot as plt
+from scipy.stats import linregress
+import numpy as np
+
+df = pd.read_csv("resumen_contracciones.csv")
+
+# Normalizar nombres de columnas si tienen espacios
+df.columns = [col.strip().replace(" ", "_") for col in df.columns]
+
+# Agregar un índice de contracción (orden temporal)
+df["N°"] = range(1, len(df) + 1)
 
 
+plt.figure(figsize=(10,6))
+plt.plot(df["N°"], df["Frecuencia_Media_(Hz)"], 'o-', color='royalblue', label="Frecuencia Media (Hz)")
+plt.plot(df["N°"], df["Frecuencia_Mediana_(Hz)"], 'o-', color='orange', label="Frecuencia Mediana (Hz)")
 
+# Calcular líneas de tendencia
+slope_media, intercept_media, *_ = linregress(df["N°"], df["Frecuencia_Media_(Hz)"])
+slope_mediana, intercept_mediana, *_ = linregress(df["N°"], df["Frecuencia_Mediana_(Hz)"])
 
+tendencia_media = intercept_media + slope_media * np.array(df["N°"])
+tendencia_mediana = intercept_mediana + slope_mediana * np.array(df["N°"])
+
+plt.plot(df["N°"], tendencia_media, '--', color='blue', alpha=0.7, label="Tendencia Media")
+plt.plot(df["N°"], tendencia_mediana, '--', color='red', alpha=0.7, label="Tendencia Mediana")
+
+plt.title("Evolución de la Frecuencia Media y Mediana durante la Fatiga Muscular")
+plt.xlabel("Número de Contracción")
+plt.ylabel("Frecuencia (Hz)")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+print("🔹 Pendiente de la Frecuencia Media:", round(slope_media, 4))
+print("🔹 Pendiente de la Frecuencia Mediana:", round(slope_mediana, 4))
+
+if slope_media < 0 and slope_mediana < 0:
+    print("\n📉 Las dos pendientes son negativas → tendencia descendente clara.")
+    print("👉 Esto indica la aparición de fatiga muscular progresiva.")
+elif slope_media < 0 or slope_mediana < 0:
+    print("\n⚠️ Solo una frecuencia muestra descenso significativo → posible fatiga parcial.")
+else:
+    print("\n📈 No hay tendencia descendente clara → no se observa fatiga muscular evidente.")
+
+```
+evidnciando la siguiente grafica:
+
+<img width="989" height="590" alt="image" src="https://github.com/user-attachments/assets/82d8345b-dc18-4022-a99c-cee562449624" />
+
+🔹 Pendiente de la Frecuencia Media: -0.0106
+🔹 Pendiente de la Frecuencia Mediana: 0.0563
 
 
 ## Parte C 
