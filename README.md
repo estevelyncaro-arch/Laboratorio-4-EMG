@@ -828,7 +828,11 @@ evidnciando la siguiente grafica:
 <img width="989" height="590" alt="image" src="https://github.com/user-attachments/assets/82d8345b-dc18-4022-a99c-cee562449624" />
 
 🔹 Pendiente de la Frecuencia Media: -0.0106
+
 🔹 Pendiente de la Frecuencia Mediana: 0.0563
+
+Las variaciones en las frecuencias media y mediana del EMG constituyen un indicador sensible de fatiga muscular. Una disminución progresiva en estos parámetros suele asociarse con una menor velocidad de conducción en las fibras musculares, así como con un cambio en el patrón de reclutamiento hacia unidades motoras de contracción más lenta. En el conjunto de datos analizado, los cambios observados son moderados, lo que sugiere que el músculo conserva un rendimiento funcional estable, con apenas signos incipientes de fatiga fisiológica.
+Cabe señalar que esta estabilidad también podría deberse a una limitación en la medición, como el uso de un módulo orientado al registro del latido cardíaco en lugar de las contracciones musculares, lo cual afectaría la sensibilidad del análisis electromiográfico.
 
 
 ## Parte C 
