@@ -839,4 +839,132 @@ Cabe señalar que esta estabilidad también podría deberse a una limitación en
 
 ![Diagramas lab 4_page-0003](https://github.com/user-attachments/assets/61307227-83f8-4225-9303-267050daeab5)
 
+Para esta ultima parte se aplica la transformada rápida de Fourier (FFT) a cada contracción de la señal y se realiza la gráfica de el espectro de amplitud comparando las primeras contracciones con la ultimas utilizando el siguiente código:
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.signal import butter, filtfilt
+from scipy.fft import fft, fftfreq
+
+# =====================================================
+# 1️⃣ CONFIGURACIÓN Y CARGA DE DATOS
+# =====================================================
+ruta_txt = "/senal_EMG_captura_2.txt"  # <-- cambia si es necesario
+fs = 1000                              # Frecuencia de muestreo [Hz]
+
+# Cargar la señal
+data = np.loadtxt(ruta_txt)
+t = data[:, 0]
+x = data[:, 1]
+
+# =====================================================
+# 2️⃣ FILTRADO PASA BANDA (20–450 Hz)
+# =====================================================
+def butter_bandpass(lowcut, highcut, fs, order=4):
+    nyq = 0.5 * fs
+    low, high = lowcut / nyq, highcut / nyq
+    b, a = butter(order, [low, high], btype='band')
+    return b, a
+
+def aplicar_filtro(data, lowcut, highcut, fs, order=4):
+    b, a = butter_bandpass(lowcut, highcut, fs, order)
+    return filtfilt(b, a, data)
+
+x_filt = aplicar_filtro(x, 20, 450, fs)
+
+# =====================================================
+# 3️⃣ SEGMENTACIÓN AUTOMÁTICA DE CONTRACCIONES
+# =====================================================
+x_rect = np.abs(x_filt - np.mean(x_filt))
+b, a = butter(2, 2/(fs/2), btype='low')
+env = filtfilt(b, a, x_rect)
+env_norm = env / np.max(env)
+
+umbral = np.mean(env_norm) + 1.2*np.std(env_norm)
+activa = env_norm > umbral
+
+start_idx = np.where(np.diff(activa.astype(int)) == 1)[0]
+end_idx   = np.where(np.diff(activa.astype(int)) == -1)[0]
+
+if len(end_idx) > 0 and end_idx[0] < start_idx[0]:
+    end_idx = end_idx[1:]
+if len(start_idx) > len(end_idx):
+    start_idx = start_idx[:-1]
+
+min_len = int(0.15 * fs)
+contracciones = [(i, f) for i, f in zip(start_idx, end_idx) if (f - i) > min_len]
+
+print(f"🔹 Se detectaron {len(contracciones)} contracciones")
+
+# =====================================================
+# 4️⃣ FFT POR CONTRACCIÓN
+# =====================================================
+def calcular_fft(signal, fs):
+    N = len(signal)
+    freqs = fftfreq(N, 1/fs)
+    fft_vals = np.abs(fft(signal)) / N
+    mask = freqs > 0  # solo frecuencias positivas
+    return freqs[mask], fft_vals[mask]
+
+# =====================================================
+# 5️⃣ COMPARAR ESPECTROS: PRIMERAS VS ÚLTIMAS CONTRACCIONES
+# =====================================================
+num_mostrar = 3  # número de contracciones iniciales/finales a comparar
+
+primeras = contracciones[:num_mostrar]
+ultimas  = contracciones[-num_mostrar:]
+
+plt.figure(figsize=(12,6))
+
+# ----- Primeras contracciones
+for idx, (ini, fin) in enumerate(primeras, 1):
+    f, mag = calcular_fft(x_filt[ini:fin], fs)
+    plt.plot(f, mag, label=f"Inicio c{idx}", alpha=0.7)
+
+# ----- Últimas contracciones
+for idx, (ini, fin) in enumerate(ultimas, 1):
+    f, mag = calcular_fft(x_filt[ini:fin], fs)
+    plt.plot(f, mag, '--', label=f"Final c{len(contracciones)-num_mostrar+idx}", alpha=0.7)
+
+plt.xlim(0, 250)  # rango típico EMG útil
+plt.title("Comparación del espectro EMG - Primeras vs Últimas Contracciones")
+plt.xlabel("Frecuencia (Hz)")
+plt.ylabel("Magnitud (a.u.)")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+# =====================================================
+#  ANÁLISIS DE FATIGA
+# =====================================================
+# Calcular frecuencia media para cada contracción
+freqs_medias = []
+for ini, fin in contracciones:
+    f, mag = calcular_fft(x_filt[ini:fin], fs)
+    f_media = np.sum(f * mag) / np.sum(mag)
+    freqs_medias.append(f_media)
+
+# Graficar tendencia de la frecuencia media
+plt.figure(figsize=(8,4))
+plt.plot(freqs_medias, 'o-', color='purple')
+plt.title("Tendencia de la Frecuencia Media - Fatiga Muscular")
+plt.xlabel("Número de Contracción")
+plt.ylabel("Frecuencia Media (Hz)")
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+```
+Obteniendo las gráficas que se muestran a continuación:
+<img width="1189" height="590" alt="image" src="https://github.com/user-attachments/assets/029433cc-b34a-4d19-984d-bc8cef919d0c" />
+
+<img width="788" height="390" alt="image" src="https://github.com/user-attachments/assets/dfd8b955-9e98-4b8a-b528-4252130b9cf3" />
+
+
+En la primer gráfica podemos observar que las contracciones iniciales c1, c2 y c3 tienen una amplitud de magnitud entre 0,003 y 0,006 y las contracciones finales tienen una amplitud mayor siendo esta de una magnitud entre  0,006 Y 0,008 esto nos indica que en las contracciones iniciales como hay una menor actividad al estar el músculo en reposo entonces hay una menor magnitud en la gráfica, por otro lado en las contracciones finales como hay mayor activacion de unidades motoras aumenta la magnitud lo que demuestra la presencia de fatiga en el músculo.
+Adicionalmente podemos observar en la segunda gráfica que cuando el músculo tiene una mayor intensidad en la contracción la frecuancia media es alta , pero evidenciamos además que la frecuencia disminuye cuando el músculo está fatigado debido a que el potencial de acción se propaga más lento generando menos picos de alta frecuencia.
+
+El análisis espectral como herramienta diagnóstica en electromiografía es muy útil ya que el contenido de alta frecuencia y el desplazaiento de los picos hacia altas o bajas frecuencias permiten identificar la activación muscular, la fatiga como lo observamos en este laboratorio pero además permite detectar neuropatías o miopatías en el músculo, por ejemplo detectando actividad cuando el músculo está en reposo. 
+
+
 
